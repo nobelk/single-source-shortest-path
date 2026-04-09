@@ -9,6 +9,10 @@ __pycache__/
 # Idea file
 .idea/
 
+.omc
+
+state/
+
 # Distribution / packaging
 .Python
 build/

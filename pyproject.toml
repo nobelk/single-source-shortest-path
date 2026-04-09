@@ -10,7 +10,7 @@ dependencies = [
 
 
 [project.scripts]
-quranllm = "sssp.main:main"
+sssp = "sssp.main:main"
 
 
 [build-system]

@@ -5,7 +5,12 @@
       "Bash(uv run:*)",
       "Bash(uv add:*)",
       "Bash(uv build:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "mcp__plugin_oh-my-claudecode_t__state_write",
+      "Bash(python:*)",
+      "Bash(python3 -m pytest tests/test_bmssp.py -v)",
+      "Bash(pip install:*)",
+      "mcp__plugin_oh-my-claudecode_t__state_clear"
     ],
     "deny": [],
     "ask": []

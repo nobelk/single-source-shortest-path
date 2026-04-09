@@ -168,7 +168,7 @@ def sssp(graph, source):
             for u in Ui:
                 for v, wuv in graph.adj[u]:
                     new_dist = db[u] + wuv
-                    if new_dist <= db[v]:
+                    if new_dist < db[v]:
                         db[v] = new_dist
                         pred[v] = u
 

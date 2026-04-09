@@ -1,5 +1,27 @@
 import unittest
+import heapq
+import random
 from sssp.bmssp import Graph, sssp
+
+
+def dijkstra(graph, source):
+    """Reference Dijkstra implementation for correctness comparison."""
+    n = graph.n
+    dist = [float("inf")] * n
+    dist[source] = 0
+    heap = [(0, source)]
+    visited = set()
+    while heap:
+        d, u = heapq.heappop(heap)
+        if u in visited:
+            continue
+        visited.add(u)
+        for v, w in graph.adj[u]:
+            nd = d + w
+            if nd < dist[v]:
+                dist[v] = nd
+                heapq.heappush(heap, (nd, v))
+    return dist
 
 
 class TestSSSP(unittest.TestCase):
@@ -185,6 +207,102 @@ class TestSSSP(unittest.TestCase):
         # All nodes should be reachable in this connected graph
         for i in range(n):
             self.assertLess(dist[i], float("inf"), f"Node {i} should be reachable")
+
+    def test_dijkstra_comparison_simple(self):
+        """Compare sssp() against reference Dijkstra on a known simple graph."""
+        g = Graph(5)
+        g.add_edge(0, 1, 4)
+        g.add_edge(0, 2, 2)
+        g.add_edge(1, 2, 1)
+        g.add_edge(1, 3, 5)
+        g.add_edge(2, 3, 8)
+        g.add_edge(2, 4, 10)
+        g.add_edge(3, 4, 2)
+
+        dist, _ = sssp(g, 0)
+        ref = dijkstra(g, 0)
+        for v in range(g.n):
+            self.assertAlmostEqual(dist[v], ref[v], places=9,
+                msg=f"Vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+
+    def test_dijkstra_comparison_random_sparse(self):
+        """Compare sssp() against reference Dijkstra on random sparse graphs."""
+        rng = random.Random(0)
+        for trial in range(10):
+            n = rng.randint(5, 30)
+            g = Graph(n)
+            # Ensure connectivity via a chain
+            for i in range(n - 1):
+                g.add_edge(i, i + 1, rng.uniform(0.5, 10.0))
+            # Add extra random edges
+            for _ in range(n * 2):
+                u = rng.randint(0, n - 1)
+                v = rng.randint(0, n - 1)
+                if u != v:
+                    g.add_edge(u, v, rng.uniform(0.1, 20.0))
+            source = rng.randint(0, n - 1)
+            dist, _ = sssp(g, source)
+            ref = dijkstra(g, source)
+            for v in range(n):
+                self.assertAlmostEqual(dist[v], ref[v], places=9,
+                    msg=f"Trial {trial}, vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+
+    def test_dijkstra_comparison_random_dense(self):
+        """Compare sssp() against reference Dijkstra on random dense graphs."""
+        rng = random.Random(42)
+        for trial in range(5):
+            n = rng.randint(10, 20)
+            g = Graph(n)
+            for i in range(n):
+                for j in range(n):
+                    if i != j and rng.random() < 0.6:
+                        g.add_edge(i, j, rng.uniform(0.1, 15.0))
+            source = 0
+            dist, _ = sssp(g, source)
+            ref = dijkstra(g, source)
+            for v in range(n):
+                self.assertAlmostEqual(dist[v], ref[v], places=9,
+                    msg=f"Trial {trial}, vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+
+    def test_dijkstra_comparison_star_graph(self):
+        """Compare sssp() against Dijkstra on a star graph."""
+        g = Graph(20)
+        for i in range(1, 20):
+            g.add_edge(0, i, float(i))
+        dist, _ = sssp(g, 0)
+        ref = dijkstra(g, 0)
+        for v in range(g.n):
+            self.assertAlmostEqual(dist[v], ref[v], places=9,
+                msg=f"Vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+
+    def test_dijkstra_comparison_path_graph(self):
+        """Compare sssp() against Dijkstra on a path graph."""
+        n = 10
+        g = Graph(n)
+        for i in range(n - 1):
+            g.add_edge(i, i + 1, float(i + 1))
+        dist, _ = sssp(g, 0)
+        ref = dijkstra(g, 0)
+        for v in range(n):
+            self.assertAlmostEqual(dist[v], ref[v], places=9,
+                msg=f"Vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+
+    def test_sssp_simple_directed(self):
+        """Simple directed graph — moved from bare test_sssp function."""
+        g = Graph(5)
+        g.add_edge(0, 1, 4)
+        g.add_edge(0, 2, 2)
+        g.add_edge(1, 2, 1)
+        g.add_edge(1, 3, 5)
+        g.add_edge(2, 3, 8)
+        g.add_edge(2, 4, 10)
+        g.add_edge(3, 4, 2)
+        dist, _ = sssp(g, 0)
+        self.assertEqual(dist[0], 0)
+        self.assertEqual(dist[1], 4)
+        self.assertEqual(dist[2], 2)
+        self.assertEqual(dist[3], 9)
+        self.assertEqual(dist[4], 11)
 
 
 def test_sssp():
