@@ -4,35 +4,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository implements the deterministic O(m log^(2/3) n) algorithm for Single Source Shortest Paths (SSSP) in directed graphs with non-negative real weights from the 2025 paper "Breaking the Sorting Barrier for Directed Single-Source Shortest Paths" by Duan, Mao, Shu, and Yin.
+This repository is a Python *reference / prototype* of the recursive partitioning structure in the deterministic O(m log^(2/3) n) algorithm for Single Source Shortest Paths (SSSP) in directed graphs with non-negative real weights, from the 2025 paper "Breaking the Sorting Barrier for Directed Single-Source Shortest Paths" by Duan, Mao, Mao, Shu, and Yin. It does not match the paper's asymptotic bound — see `README.md` for the practical/theoretical gap.
 
 ## Commands
 
 ### Running Tests
 ```bash
-python -m pytest tests/
-# or for specific test
-python -m pytest tests/test_bmssp.py
+uv run pytest tests/
+# or for a specific test
+uv run pytest tests/test_bmssp.py
 ```
 
 ### Running the Algorithm
-The main algorithm can be imported and used:
+The main algorithm is re-exported from the package root:
 ```python
-from src.sssp.bmssp import Graph, sssp
+from sssp import Graph, sssp
 ```
 
 ## Architecture
 
 ### Core Components
 
+- **`src/sssp/__init__.py`**: Public API surface. Re-exports `Graph` and `sssp`.
 - **`src/sssp/bmssp.py`**: Main algorithm implementation
-  - `Graph` class: Simple adjacency list representation
-  - `sssp(graph, source)`: Main SSSP function implementing the recursive partitioning algorithm
-  - `bmssp()`: Core recursive function that partitions work and manages frontiers
-  - `find_pivots()`: Identifies pivot vertices for recursive decomposition
-  - `base_case()`: Handles small subproblems with Dijkstra-like approach
-
-- **`tests/test_bmssp.py`**: Unit tests with Dijkstra comparison for correctness verification
+  - `Graph` class: Simple adjacency list representation; validates inputs (non-negative finite weights, in-range vertices).
+  - `sssp(graph, source)`: Main SSSP function implementing the recursive partitioning algorithm.
+  - `_bmssp()`: Core recursive function that partitions work and manages frontiers (private).
+  - `_find_pivots()`: Identifies pivot vertices for recursive decomposition (private).
+  - `_base_case()`: Handles small subproblems with Dijkstra-like approach (private).
+  - `_BMSSPState`: Mutable state shared across recursive calls (db, pred, pred_weight, k, t).
+  - `_LazyHeapFrontier`: Heap with lazy deletion replacing the previous full-sort frontier.
+- **`src/sssp/main.py`**: CLI entry point (`sssp = "sssp.main:main"`).
+- **`tests/test_bmssp.py`**: Unit tests with Dijkstra comparison and predecessor-tree invariants.
+- **`tests/test_main.py`**: CLI behavior tests.
+- **`tests/_dijkstra.py`**: Shared reference Dijkstra and path-reconstruction helpers.
+- **`benchmarks/run_benchmarks.py`**: Reproducible wall-clock comparison against heapq Dijkstra.
 
 ### Algorithm Structure
 

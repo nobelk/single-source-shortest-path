@@ -1,14 +1,21 @@
 [![Python 3.13.4+](https://img.shields.io/badge/python-3.13.4%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen.svg)](htmlcov/index.html)
 
-# Single-Source Shortest Path — O(m log^(2/3) n) Algorithm
+# Single-Source Shortest Path — Reference Implementation of the BMSSP Algorithm
 
-A Python implementation of the deterministic O(m log^(2/3) n) algorithm for Single-Source Shortest Paths (SSSP) in directed graphs with non-negative real weights, as described in:
+A Python *reference / prototype* implementation of the recursive partitioning structure introduced in the deterministic O(m log^(2/3) n) algorithm for Single-Source Shortest Paths (SSSP) in directed graphs with non-negative real weights:
 
 > "Breaking the Sorting Barrier for Directed Single-Source Shortest Paths"
 > Ran Duan, Jiayi Mao, Xiao Mao, Xinkai Shu, Longhui Yin (2025)
+
+This repository implements the algorithmic *structure* — recursive partitioning, pivot finding, and bounded multi-source SSSP — with simpler Python substitutes for the paper's specialized data structures. It is suitable for understanding, teaching, and experimenting with the algorithm. It does **not** reproduce the paper's asymptotic O(m log^(2/3) n) bound, because:
+
+- The frontier `D` is implemented as a heap with lazy deletion rather than the paper's batched data structure, and does not match the amortized-pull cost.
+- The pivot-forest is built and traversed with simple dict/DFS bookkeeping rather than the paper's specialized structure.
+- Python overhead dominates for any practical input size.
+
+For asymptotic-fidelity work, treat this as a starting point and a correctness oracle, not as a benchmark of the paper's bound.
 
 ## Motivation
 
@@ -94,7 +101,7 @@ uv sync
 ### Basic Example
 
 ```python
-from sssp.bmssp import Graph, sssp
+from sssp import Graph, sssp
 
 # Create a simple line graph: 0->1->2->3->4, all edge weights 1
 g = Graph(5)
@@ -110,7 +117,7 @@ print(predecessors)  # Output: [None, 0, 1, 2, 3]
 ### Advanced Example
 
 ```python
-from sssp.bmssp import Graph, sssp
+from sssp import Graph, sssp
 
 # Create a directed weighted graph with a non-obvious shortest path
 g = Graph(4)
@@ -122,6 +129,26 @@ g.add_edge(2, 3, 3)
 distances, predecessors = sssp(g, 0)
 print(distances)     # Output: [0, 2, 3, 6]
 print(predecessors)  # Output: [None, 0, 1, 2]
+```
+
+### Command-Line Interface
+
+```bash
+echo "3 0
+0 1 2.0
+1 2 3.0" | uv run sssp -
+
+# Output (vertex<TAB>distance<TAB>predecessor):
+# 0    0    -
+# 1    2    0
+# 2    5    1
+```
+
+Use `--format json` to emit machine-readable output:
+
+```bash
+echo "3 0
+0 1 1.5" | uv run sssp - --format json
 ```
 
 ### API Reference
@@ -171,9 +198,12 @@ uv run pytest tests/test_bmssp.py -v
 
 ### Test Coverage
 
-The test suite uses two verification strategies:
+The test suite uses several verification strategies:
+- **Contract tests**: Verify that invalid inputs (negative weights, out-of-range vertices, non-finite weights) are rejected with clear errors.
 - **Known-value tests**: Hand-crafted graphs with pre-computed expected distances.
-- **Dijkstra comparison tests**: Random sparse and dense graphs where `sssp()` output is compared against a reference Dijkstra implementation to 9 decimal places.
+- **Dijkstra comparison tests**: Random sparse and dense graphs where `sssp()` output is compared against a reference Dijkstra implementation.
+- **Predecessor-tree invariants**: Walk the `predecessors` chain back to the source and verify the summed edge weights equal the reported distance.
+- **Numeric scale tests**: Verify correctness across very small (`1e-15`) and very large (`1e15`) weight magnitudes.
 
 ```bash
 # Run tests with coverage measurement
@@ -186,8 +216,6 @@ uv run coverage report
 uv run coverage html
 ```
 
-Current test coverage: **94%**
-
 ### Building
 
 ```bash
@@ -197,7 +225,20 @@ uv build
 ### Running the Package
 
 ```bash
-uv run python -m sssp.main
+# As an installed console script (preferred):
+uv run sssp path/to/graph.txt
+
+# Or as a module:
+uv run python -m sssp.main path/to/graph.txt
+```
+
+### Benchmarks
+
+Compare this implementation against a reference `heapq` Dijkstra on fixed-seed
+synthetic workloads:
+
+```bash
+uv run python benchmarks/run_benchmarks.py
 ```
 
 ## Limitations and Notes

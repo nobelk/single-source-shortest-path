@@ -1,215 +1,186 @@
-import unittest
-import heapq
+"""Correctness tests for the BMSSP reference implementation."""
+
+from __future__ import annotations
+
+import math
 import random
-from sssp.bmssp import Graph, sssp
+
+import pytest
+
+from sssp import Graph, sssp
+
+from tests._dijkstra import dijkstra, path_weight, reconstruct_path
 
 
-def dijkstra(graph, source):
-    """Reference Dijkstra implementation for correctness comparison."""
-    n = graph.n
-    dist = [float("inf")] * n
-    dist[source] = 0
-    heap = [(0, source)]
-    visited = set()
-    while heap:
-        d, u = heapq.heappop(heap)
-        if u in visited:
-            continue
-        visited.add(u)
-        for v, w in graph.adj[u]:
-            nd = d + w
-            if nd < dist[v]:
-                dist[v] = nd
-                heapq.heappush(heap, (nd, v))
-    return dist
+# ---------------------------------------------------------------------------
+# Graph and sssp contract enforcement
+# ---------------------------------------------------------------------------
 
 
-class TestSSSP(unittest.TestCase):
+class TestContract:
+    def test_graph_zero_size_rejected(self):
+        with pytest.raises(ValueError):
+            Graph(0)
 
-    def test_empty_graph(self):
-        """Test empty graph edge case"""
-        g = Graph(1)  # Single vertex, no edges
+    def test_graph_negative_size_rejected(self):
+        with pytest.raises(ValueError):
+            Graph(-1)
+
+    def test_graph_non_int_size_rejected(self):
+        with pytest.raises(TypeError):
+            Graph(3.5)  # type: ignore[arg-type]
+
+    def test_add_edge_negative_weight_rejected(self):
+        g = Graph(2)
+        with pytest.raises(ValueError, match="non-negative"):
+            g.add_edge(0, 1, -0.0001)
+
+    def test_add_edge_nan_weight_rejected(self):
+        g = Graph(2)
+        with pytest.raises(ValueError, match="finite"):
+            g.add_edge(0, 1, float("nan"))
+
+    def test_add_edge_inf_weight_rejected(self):
+        g = Graph(2)
+        with pytest.raises(ValueError, match="finite"):
+            g.add_edge(0, 1, float("inf"))
+
+    def test_add_edge_invalid_source_rejected(self):
+        g = Graph(2)
+        with pytest.raises(ValueError, match="source vertex"):
+            g.add_edge(2, 0, 1.0)
+
+    def test_add_edge_invalid_target_rejected(self):
+        g = Graph(2)
+        with pytest.raises(ValueError, match="target vertex"):
+            g.add_edge(0, 2, 1.0)
+
+    def test_sssp_invalid_source_rejected(self):
+        g = Graph(3)
+        g.add_edge(0, 1, 1.0)
+        with pytest.raises(ValueError, match="source out of range"):
+            sssp(g, 5)
+
+    def test_sssp_negative_source_rejected(self):
+        g = Graph(3)
+        with pytest.raises(ValueError):
+            sssp(g, -1)
+
+    def test_sssp_non_graph_rejected(self):
+        with pytest.raises(TypeError):
+            sssp("not a graph", 0)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Hand-crafted topologies
+# ---------------------------------------------------------------------------
+
+
+class TestSmallGraphs:
+    def test_single_vertex(self):
+        g = Graph(1)
         dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-        self.assertIsNone(pred[0])
+        assert dist[0] == 0
+        assert pred[0] is None
 
     def test_disconnected_graph(self):
-        """Test disconnected graph"""
         g = Graph(4)
         g.add_edge(0, 1, 1)
-        # Nodes 2 and 3 are disconnected
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-        self.assertEqual(dist[1], 1)
-        self.assertEqual(dist[2], float("inf"))
-        self.assertEqual(dist[3], float("inf"))
+        dist, _ = sssp(g, 0)
+        assert dist == [0, 1, math.inf, math.inf]
 
-    def test_self_loop(self):
-        """Test graph with self loops"""
+    def test_self_loop_is_ignored(self):
         g = Graph(3)
-        g.add_edge(0, 0, 5)  # Self loop with positive weight
+        g.add_edge(0, 0, 5)
         g.add_edge(0, 1, 2)
         g.add_edge(1, 2, 3)
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)  # Should not use self loop
-        self.assertEqual(dist[1], 2)
-        self.assertEqual(dist[2], 5)
+        dist, _ = sssp(g, 0)
+        assert dist == [0, 2, 5]
 
-    def test_multiple_sources_same_distance(self):
-        """Test case where multiple vertices have same distance"""
+    def test_multiple_paths_same_total(self):
         g = Graph(4)
         g.add_edge(0, 1, 5)
-        g.add_edge(0, 2, 5)  # Same weight
+        g.add_edge(0, 2, 5)
         g.add_edge(1, 3, 1)
-        g.add_edge(2, 3, 1)  # Both paths to 3 have same total cost
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-        self.assertEqual(dist[1], 5)
-        self.assertEqual(dist[2], 5)
-        self.assertEqual(dist[3], 6)  # min(5+1, 5+1) = 6
-
-    def test_pivot_finding_large_trees(self):
-        """Test case that exercises pivot finding with large subtrees"""
-        # Create a graph where pivot finding will be triggered
-        n = 20
-        g = Graph(n)
-
-        # Create a tree structure that will have large subtrees
-        # Root at 0 with multiple branches
-        for i in range(1, 5):
-            g.add_edge(0, i, 1)
-
-        # Each branch has a subtree
-        branch_size = 3
-        for branch in range(1, 5):
-            for j in range(branch_size):
-                node = branch * 10 + j
-                if node < n:
-                    if j == 0:
-                        g.add_edge(branch, node, 1)
-                    else:
-                        g.add_edge(branch * 10 + j - 1, node, 1)
-
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-
-        # All connected nodes should be reachable
-        for i in range(1, 5):
-            if i < n:
-                self.assertLess(dist[i], float("inf"))
-
-    def test_heavy_vs_light_edges(self):
-        """Test algorithm choice between heavy and light edge paths"""
-        g = Graph(4)
-        g.add_edge(0, 1, 100)  # Heavy direct path
-        g.add_edge(0, 2, 1)  # Light path via intermediate
         g.add_edge(2, 3, 1)
-        g.add_edge(1, 3, 1)  # Total: 100+1=101 vs 1+1=2
-
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-        self.assertEqual(dist[2], 1)
-        self.assertEqual(dist[3], 2)  # Should take light path
-        self.assertEqual(dist[1], 100)
+        dist, _ = sssp(g, 0)
+        assert dist == [0, 5, 5, 6]
 
     def test_zero_weight_edges(self):
-        """Test graph with zero weight edges"""
         g = Graph(3)
-        g.add_edge(0, 1, 0)  # Zero weight edge
+        g.add_edge(0, 1, 0)
         g.add_edge(1, 2, 5)
+        dist, _ = sssp(g, 0)
+        assert dist == [0, 0, 5]
 
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-        self.assertEqual(dist[1], 0)
-        self.assertEqual(dist[2], 5)
+    def test_heavy_vs_light_path(self):
+        g = Graph(4)
+        g.add_edge(0, 1, 100)
+        g.add_edge(0, 2, 1)
+        g.add_edge(2, 3, 1)
+        g.add_edge(1, 3, 1)
+        dist, _ = sssp(g, 0)
+        assert dist == [0, 100, 1, 2]
 
-    def test_dense_graph(self):
-        """Test algorithm on dense graph"""
-        n = 8
-        g = Graph(n)
+    def test_known_directed_graph(self):
+        g = Graph(5)
+        g.add_edge(0, 1, 4)
+        g.add_edge(0, 2, 2)
+        g.add_edge(1, 2, 1)
+        g.add_edge(1, 3, 5)
+        g.add_edge(2, 3, 8)
+        g.add_edge(2, 4, 10)
+        g.add_edge(3, 4, 2)
+        dist, _ = sssp(g, 0)
+        assert dist == [0, 4, 2, 9, 11]
 
-        # Add edges between all pairs with distance as weight
-        for i in range(n):
-            for j in range(i + 1, n):
-                weight = abs(i - j)
-                g.add_edge(i, j, weight)
-                g.add_edge(j, i, weight)  # Make it undirected
 
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
+# ---------------------------------------------------------------------------
+# Pivot finding and recursive descent stress
+# ---------------------------------------------------------------------------
 
-        # In this setup, distance should be minimum edge weight to each node
-        for i in range(1, n):
-            self.assertEqual(dist[i], i)  # Direct edge has weight i
 
-    def test_edge_cases_for_coverage(self):
-        """Test edge cases to improve coverage"""
-        # Test case that triggers empty source set in base_case (line 33)
-        from sssp.bmssp import sssp
-
-        g = Graph(2)
-        g.add_edge(0, 1, 1)
-
-        # This should work normally and not trigger the empty set case
-        # The empty set case is an internal edge case that's hard to trigger directly
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-        self.assertEqual(dist[1], 1)
-
-    def test_large_graph_with_early_termination(self):
-        """Test case designed to trigger early termination conditions"""
-        # Create a larger graph to trigger more complex algorithm paths
-        n = 50
-        g = Graph(n)
-
-        # Create a connected path with some shortcuts
-        for i in range(n - 1):
-            g.add_edge(i, i + 1, 1)
-
-        # Add some shortcut edges that might trigger different algorithm paths
-        g.add_edge(0, 10, 5)  # Shortcut
-        g.add_edge(0, 20, 8)  # Another shortcut
-        g.add_edge(10, 30, 3)  # Cross-edges
-
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-
-        # Check that some shortcuts are actually better than the long path
-        self.assertLess(dist[10], 10)  # Should use shortcut
-
-    def test_stress_test_complex_topology(self):
-        """Test complex graph topology to exercise more code paths"""
+class TestStressTopologies:
+    def test_grid_graph_all_reachable(self):
         n = 25
         g = Graph(n)
-
-        # Create a more complex topology: grid-like structure
-        # Horizontal connections
         for i in range(5):
             for j in range(4):
                 node = i * 5 + j
                 g.add_edge(node, node + 1, 1)
-
-        # Vertical connections
         for i in range(4):
             for j in range(5):
                 node = i * 5 + j
                 g.add_edge(node, node + 5, 2)
-
-        # Diagonal connections to create more complex shortest paths
         for i in range(4):
             for j in range(4):
                 node = i * 5 + j
-                g.add_edge(node, node + 6, 3)  # Diagonal down-right
+                g.add_edge(node, node + 6, 3)
+        dist, _ = sssp(g, 0)
+        for v in range(n):
+            assert dist[v] < math.inf, f"vertex {v} should be reachable"
 
-        dist, pred = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
+    def test_long_path_with_shortcuts(self):
+        """Designed to push the recursive algorithm into deeper levels."""
+        n = 50
+        g = Graph(n)
+        for i in range(n - 1):
+            g.add_edge(i, i + 1, 1)
+        g.add_edge(0, 10, 5)
+        g.add_edge(0, 20, 8)
+        g.add_edge(10, 30, 3)
+        dist, _ = sssp(g, 0)
+        ref, _ = dijkstra(g, 0)
+        assert dist == ref
 
-        # All nodes should be reachable in this connected graph
-        for i in range(n):
-            self.assertLess(dist[i], float("inf"), f"Node {i} should be reachable")
 
-    def test_dijkstra_comparison_simple(self):
-        """Compare sssp() against reference Dijkstra on a known simple graph."""
+# ---------------------------------------------------------------------------
+# Comparison against reference Dijkstra
+# ---------------------------------------------------------------------------
+
+
+class TestDijkstraEquivalence:
+    def test_simple(self):
         g = Graph(5)
         g.add_edge(0, 1, 4)
         g.add_edge(0, 2, 2)
@@ -218,77 +189,99 @@ class TestSSSP(unittest.TestCase):
         g.add_edge(2, 3, 8)
         g.add_edge(2, 4, 10)
         g.add_edge(3, 4, 2)
-
         dist, _ = sssp(g, 0)
-        ref = dijkstra(g, 0)
-        for v in range(g.n):
-            self.assertAlmostEqual(dist[v], ref[v], places=9,
-                msg=f"Vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+        ref, _ = dijkstra(g, 0)
+        assert dist == pytest.approx(ref)
 
-    def test_dijkstra_comparison_random_sparse(self):
-        """Compare sssp() against reference Dijkstra on random sparse graphs."""
-        rng = random.Random(0)
-        for trial in range(10):
-            n = rng.randint(5, 30)
-            g = Graph(n)
-            # Ensure connectivity via a chain
-            for i in range(n - 1):
-                g.add_edge(i, i + 1, rng.uniform(0.5, 10.0))
-            # Add extra random edges
-            for _ in range(n * 2):
-                u = rng.randint(0, n - 1)
-                v = rng.randint(0, n - 1)
-                if u != v:
-                    g.add_edge(u, v, rng.uniform(0.1, 20.0))
-            source = rng.randint(0, n - 1)
-            dist, _ = sssp(g, source)
-            ref = dijkstra(g, source)
-            for v in range(n):
-                self.assertAlmostEqual(dist[v], ref[v], places=9,
-                    msg=f"Trial {trial}, vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
-
-    def test_dijkstra_comparison_random_dense(self):
-        """Compare sssp() against reference Dijkstra on random dense graphs."""
-        rng = random.Random(42)
-        for trial in range(5):
-            n = rng.randint(10, 20)
-            g = Graph(n)
-            for i in range(n):
-                for j in range(n):
-                    if i != j and rng.random() < 0.6:
-                        g.add_edge(i, j, rng.uniform(0.1, 15.0))
-            source = 0
-            dist, _ = sssp(g, source)
-            ref = dijkstra(g, source)
-            for v in range(n):
-                self.assertAlmostEqual(dist[v], ref[v], places=9,
-                    msg=f"Trial {trial}, vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
-
-    def test_dijkstra_comparison_star_graph(self):
-        """Compare sssp() against Dijkstra on a star graph."""
+    def test_star_graph(self):
         g = Graph(20)
         for i in range(1, 20):
             g.add_edge(0, i, float(i))
         dist, _ = sssp(g, 0)
-        ref = dijkstra(g, 0)
-        for v in range(g.n):
-            self.assertAlmostEqual(dist[v], ref[v], places=9,
-                msg=f"Vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+        ref, _ = dijkstra(g, 0)
+        assert dist == pytest.approx(ref)
 
-    def test_dijkstra_comparison_path_graph(self):
-        """Compare sssp() against Dijkstra on a path graph."""
-        n = 10
-        g = Graph(n)
-        for i in range(n - 1):
+    def test_path_graph(self):
+        g = Graph(10)
+        for i in range(9):
             g.add_edge(i, i + 1, float(i + 1))
         dist, _ = sssp(g, 0)
-        ref = dijkstra(g, 0)
-        for v in range(n):
-            self.assertAlmostEqual(dist[v], ref[v], places=9,
-                msg=f"Vertex {v}: sssp={dist[v]}, dijkstra={ref[v]}")
+        ref, _ = dijkstra(g, 0)
+        assert dist == pytest.approx(ref)
 
-    def test_sssp_simple_directed(self):
-        """Simple directed graph — moved from bare test_sssp function."""
+    @pytest.mark.parametrize("seed", list(range(10)))
+    def test_random_sparse(self, seed):
+        rng = random.Random(seed)
+        n = rng.randint(5, 30)
+        g = Graph(n)
+        for i in range(n - 1):
+            g.add_edge(i, i + 1, rng.uniform(0.5, 10.0))
+        for _ in range(n * 2):
+            u, v = rng.randint(0, n - 1), rng.randint(0, n - 1)
+            if u != v:
+                g.add_edge(u, v, rng.uniform(0.1, 20.0))
+        source = rng.randint(0, n - 1)
+        dist, _ = sssp(g, source)
+        ref, _ = dijkstra(g, source)
+        assert dist == pytest.approx(ref)
+
+    @pytest.mark.parametrize("seed", list(range(5)))
+    def test_random_dense(self, seed):
+        rng = random.Random(42 + seed)
+        n = rng.randint(10, 20)
+        g = Graph(n)
+        for i in range(n):
+            for j in range(n):
+                if i != j and rng.random() < 0.6:
+                    g.add_edge(i, j, rng.uniform(0.1, 15.0))
+        dist, _ = sssp(g, 0)
+        ref, _ = dijkstra(g, 0)
+        assert dist == pytest.approx(ref)
+
+    def test_large_random_graph_triggers_deep_recursion(self):
+        """A larger graph forces the recursive bmssp into multiple levels and
+        exercises both the K reinsertion path (B'_i <= new_dist < B_i) and the
+        direct frontier insertion path (B_i <= new_dist < B)."""
+        rng = random.Random(2025)
+        n = 200
+        g = Graph(n)
+        for i in range(n - 1):
+            g.add_edge(i, i + 1, rng.uniform(0.5, 5.0))
+        for _ in range(n * 4):
+            u, v = rng.randint(0, n - 1), rng.randint(0, n - 1)
+            if u != v:
+                g.add_edge(u, v, rng.uniform(0.1, 30.0))
+        dist, _ = sssp(g, 0)
+        ref, _ = dijkstra(g, 0)
+        assert dist == pytest.approx(ref)
+
+
+# ---------------------------------------------------------------------------
+# Predecessor-tree invariants
+# ---------------------------------------------------------------------------
+
+
+class TestPredecessorInvariants:
+    """Verifies the predecessor array reconstructs a valid shortest-path tree."""
+
+    @staticmethod
+    def _check_pred_tree(g: Graph, source: int):
+        dist, pred = sssp(g, source)
+        ref_dist, _ = dijkstra(g, source)
+        for v in range(g.n):
+            if math.isinf(dist[v]):
+                assert math.isinf(ref_dist[v])
+                assert pred[v] is None
+                continue
+            # Walking pred from v should reach the source through real edges
+            # whose total weight equals dist[v].
+            path = reconstruct_path(pred, v)
+            assert path[0] == source, f"pred chain for {v} did not reach source"
+            assert path[-1] == v
+            assert path_weight(g, path) == pytest.approx(dist[v])
+            assert dist[v] == pytest.approx(ref_dist[v])
+
+    def test_pred_tree_simple_directed(self):
         g = Graph(5)
         g.add_edge(0, 1, 4)
         g.add_edge(0, 2, 2)
@@ -297,88 +290,62 @@ class TestSSSP(unittest.TestCase):
         g.add_edge(2, 3, 8)
         g.add_edge(2, 4, 10)
         g.add_edge(3, 4, 2)
+        self._check_pred_tree(g, 0)
+
+    def test_pred_tree_disconnected(self):
+        g = Graph(4)
+        g.add_edge(0, 1, 1)
+        self._check_pred_tree(g, 0)
+
+    @pytest.mark.parametrize("seed", list(range(5)))
+    def test_pred_tree_random(self, seed):
+        rng = random.Random(seed * 17 + 1)
+        n = rng.randint(8, 25)
+        g = Graph(n)
+        for i in range(n - 1):
+            g.add_edge(i, i + 1, rng.uniform(0.5, 5.0))
+        for _ in range(n * 3):
+            u, v = rng.randint(0, n - 1), rng.randint(0, n - 1)
+            if u != v:
+                g.add_edge(u, v, rng.uniform(0.1, 10.0))
+        self._check_pred_tree(g, 0)
+
+
+# ---------------------------------------------------------------------------
+# Numeric robustness
+# ---------------------------------------------------------------------------
+
+
+class TestNumericScales:
+    """Verifies the algorithm copes with weight scales that would have broken
+    the previous fixed 1e-9 absolute-tolerance forest test."""
+
+    def test_very_small_weights(self):
+        g = Graph(4)
+        g.add_edge(0, 1, 1e-15)
+        g.add_edge(1, 2, 2e-15)
+        g.add_edge(2, 3, 3e-15)
         dist, _ = sssp(g, 0)
-        self.assertEqual(dist[0], 0)
-        self.assertEqual(dist[1], 4)
-        self.assertEqual(dist[2], 2)
-        self.assertEqual(dist[3], 9)
-        self.assertEqual(dist[4], 11)
+        ref, _ = dijkstra(g, 0)
+        assert dist == pytest.approx(ref, rel=1e-9, abs=1e-30)
 
+    def test_very_large_weights(self):
+        g = Graph(4)
+        g.add_edge(0, 1, 1e15)
+        g.add_edge(1, 2, 2e15)
+        g.add_edge(2, 3, 3e15)
+        dist, _ = sssp(g, 0)
+        ref, _ = dijkstra(g, 0)
+        assert dist == pytest.approx(ref)
 
-def test_sssp():
-    """Test the fixed SSSP algorithm"""
-    import random
-
-    # Test 1: Simple directed graph
-    g1 = Graph(5)
-    g1.add_edge(0, 1, 4)
-    g1.add_edge(0, 2, 2)
-    g1.add_edge(1, 2, 1)
-    g1.add_edge(1, 3, 5)
-    g1.add_edge(2, 3, 8)
-    g1.add_edge(2, 4, 10)
-    g1.add_edge(3, 4, 2)
-
-    dist1, pred1 = sssp(g1, 0)
-    assert dist1[0] == 0
-    assert dist1[1] == 4
-    assert dist1[2] == 2
-    assert dist1[3] == 9
-    assert dist1[4] == 11
-    print("Test 1 passed: Simple directed graph")
-
-    # Test 2: Larger random graph
-    n = 100
-    g2 = Graph(n)
-    random.seed(42)
-
-    # Create a connected graph
-    for i in range(n - 1):
-        g2.add_edge(i, i + 1, random.uniform(1, 10))
-
-    # Add more random edges
-    for _ in range(n * 2):
-        u = random.randint(0, n - 2)
-        v = random.randint(u + 1, n - 1)
-        w = random.uniform(1, 20)
-        g2.add_edge(u, v, w)
-
-    dist2, pred2 = sssp(g2, 0)
-
-    # Verify basic properties
-    assert dist2[0] == 0
-    for i in range(1, n):
-        assert dist2[i] < float("inf"), f"Node {i} should be reachable"
-        assert dist2[i] > 0, f"Distance to node {i} should be positive"
-
-    print("Test 2 passed: Larger random graph")
-
-    # Test 3: Graph with single path
-    g3 = Graph(10)
-    for i in range(9):
-        g3.add_edge(i, i + 1, i + 1)
-
-    dist3, pred3 = sssp(g3, 0)
-    expected_dist = 0
-    for i in range(10):
-        assert (
-            abs(dist3[i] - expected_dist) < 1e-9
-        ), f"Node {i}: expected {expected_dist}, got {dist3[i]}"
-        if i < 9:
-            expected_dist += i + 1
-
-    print("Test 3 passed: Single path graph")
-
-    # Test 4: Star graph
-    g4 = Graph(20)
-    for i in range(1, 20):
-        g4.add_edge(0, i, i)
-
-    dist4, pred4 = sssp(g4, 0)
-    assert dist4[0] == 0
-    for i in range(1, 20):
-        assert dist4[i] == i
-
-    print("Test 4 passed: Star graph")
-
-    print("\nAll tests passed!")
+    def test_mixed_weight_scales(self):
+        g = Graph(5)
+        g.add_edge(0, 1, 1e-12)
+        g.add_edge(1, 2, 1e12)
+        g.add_edge(0, 3, 1.0)
+        g.add_edge(3, 4, 1.0)
+        g.add_edge(2, 4, 1e-12)
+        dist, _ = sssp(g, 0)
+        ref, _ = dijkstra(g, 0)
+        for v in range(g.n):
+            assert dist[v] == pytest.approx(ref[v], rel=1e-9)
